@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <!-- Viewport ปรับขนาดให้พอดีหน้าจอมือถือ ป้องกันการซูมผิดสัดส่วน และรองรับ Safe Area ขอบจอมือถือรุ่นใหม่ -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  
+  <!-- Mobile & PWA Meta Tags (รองรับการ Add to Home Screen ให้เหมือนแอปบนมือถือ) -->
+  <meta name="theme-color" content="#0b1120">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="PicoW MQTT">
+  <meta name="application-name" content="PicoW MQTT">
+
+  <title>Raspberry Pi Pico W - MQTT Controller</title>
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  
+  <!-- Paho MQTT WebSocket Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
+
+  <style>
+    :root {
+      --bg-color: #0b1120;
+      --card-bg: rgba(30, 41, 59, 0.75);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --primary: #ec4899;
+      --primary-glow: rgba(236, 72, 153, 0.4);
+      --success: #10b981;
+      --danger: #ef4444;
+      --warning: #f59e0b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-tap-highlight-color: transparent; /* ปิดแถบสีไฮไลต์เวลากดปุ่มบนมือถือ */
+    }
+
+    body {
+      font-family: 'Kanit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background: radial-gradient(circle at top right, #3b0764, #0f172a 60%, #020617);
+      color: var(--text);
+      min-height: 100vh;
+      min-height: -webkit-fill-available;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      /* รองรับ Notch/Dynamic Island สำหรับ iPhone และ Android */
+      padding: max(16px, env(safe-area-inset-top)) max(14px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left));
+      touch-action: pan-y;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 900px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    header {
+      text-align: center;
+      padding: 6px 0 10px 0;
+    }
+
+    header h1 {
+      font-size: clamp(1.4rem, 5vw, 1.85rem);
+      font-weight: 700;
+      background: linear-gradient(135deg, #f472b6, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 4px;
+      line-height: 1.3;
+    }
+
+    header p {
+      color: var(--text-muted);
+      font-size: clamp(0.8rem, 3.2vw, 0.95rem);
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 16px;
+    }
+
+    @media (min-width: 768px) {
+      .grid {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.35);
+      transition: all 0.25s ease;
+    }
+
+    @media (min-width: 640px) {
+      .card {
+        padding: 24px;
+      }
+    }
+
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      padding-bottom: 10px;
+    }
+
+    .badge {
+      font-size: 0.72rem;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-weight: 500;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .badge-connected {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .badge-connected .badge-dot {
+      background: #10b981;
+      box-shadow: 0 0 8px #10b981;
+    }
+
+    .badge-disconnected {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+    .badge-disconnected .badge-dot {
+      background: #ef4444;
+    }
+
+    .lamp-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 14px 0;
+      user-select: none;
+    }
+
+    .bulb-svg {
+      width: clamp(96px, 24vw, 125px);
+      height: clamp(96px, 24vw, 125px);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.5));
+    }
+
+    .bulb-svg.is-on {
+      filter: drop-shadow(0 0 35px #facc15) drop-shadow(0 0 15px #f59e0b);
+      transform: scale(1.03);
+    }
+
+    .bulb-status-text {
+      margin-top: 14px;
+      font-size: clamp(1.2rem, 4.5vw, 1.45rem);
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-align: center;
+    }
+
+    .status-on {
+      color: #facc15;
+      text-shadow: 0 0 14px rgba(250, 204, 21, 0.7);
+    }
+
+    .status-off {
+      color: var(--text-muted);
+    }
+
+    .control-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .btn {
+      font-family: 'Kanit', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      min-height: 52px; /* ขนาดขั้นต่ำ 48-52px สำหรับนิ้วมือสัมผัสบนสมาร์ตโฟน */
+      padding: 12px 16px;
+      border-radius: 14px;
+      border: none;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-user-select: none;
+      transition: transform 0.12s ease, box-shadow 0.15s ease, background 0.2s ease;
+    }
+
+    .btn:active {
+      transform: scale(0.95);
+    }
+
+    .btn-on {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);
+    }
+    .btn-on:active {
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.5);
+    }
+
+    .btn-off {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+      box-shadow: 0 4px 14px rgba(239, 68, 68, 0.35);
+    }
+    .btn-off:active {
+      box-shadow: 0 2px 8px rgba(239, 68, 68, 0.5);
+    }
+
+    .btn-toggle {
+      grid-column: span 2;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--card-border);
+      color: var(--text);
+      font-size: 1.05rem;
+    }
+    .btn-toggle:active {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    /* Accordion Settings Toggle สำหรับมือถือ */
+    .settings-header {
+      cursor: pointer;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    .settings-header:hover {
+      opacity: 0.9;
+    }
+
+    .toggle-icon {
+      font-size: 0.85rem;
+      transition: transform 0.25s ease;
+      display: inline-block;
+      margin-left: 6px;
+    }
+
+    .settings-collapsed .toggle-icon {
+      transform: rotate(-90deg);
+    }
+
+    .settings-body {
+      transition: max-height 0.3s ease, opacity 0.2s ease;
+      overflow: hidden;
+    }
+
+    .settings-collapsed .settings-body {
+      display: none;
+    }
+
+    .form-group {
+      margin-bottom: 12px;
+    }
+
+    .form-group label {
+      display: block;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+    }
+
+    .form-control {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      padding: 10px 12px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      /* บังคับ font-size: 16px บนมือถือเพื่อป้องกัน Safari/Chrome iOS ซูมเข้าอัตโนมัติ */
+      font-size: 16px; 
+      transition: border-color 0.2s ease;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: #f472b6;
+      box-shadow: 0 0 0 2px rgba(244, 114, 182, 0.2);
+    }
+
+    .btn-connect {
+      width: 100%;
+      min-height: 48px;
+      background: linear-gradient(135deg, #ec4899, #db2777);
+      color: white;
+      margin-top: 8px;
+      box-shadow: 0 4px 14px rgba(236, 72, 153, 0.3);
+    }
+
+    .topic-helper {
+      font-size: 0.73rem;
+      color: #94a3b8;
+      margin-top: 3px;
+    }
+
+    .terminal-card {
+      grid-column: 1 / -1;
+    }
+
+    .terminal-box {
+      background: #020617;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      padding: 10px 12px;
+      height: 140px;
+      overflow-y: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8rem;
+      line-height: 1.5;
+      -webkit-overflow-scrolling: touch; /* เลื่อนลื่นบน iOS */
+    }
+
+    .terminal-line {
+      margin-bottom: 4px;
+      word-break: break-all;
+    }
+
+    .log-time { color: #64748b; }
+    .log-topic { color: #38bdf8; }
+    .log-payload { color: #facc15; font-weight: 600; }
+    .log-info { color: #10b981; }
+    .log-err { color: #ef4444; }
+
+    /* ป้ายคำแนะนำการติดตั้งบนหน้าจอมือถือ */
+    .mobile-tip {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      text-align: center;
+      padding: 8px 12px;
+      background: rgba(255, 255, 255, 0.04);
+      border-radius: 10px;
+      border: 1px dashed rgba(255, 255, 255, 0.12);
+    }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <header>
+      <h1>Raspberry Pi Pico W - MQTT Controller</h1>
+      <p>วิชา: การควบคุมอุปกรณ์ไฟฟ้าด้วยระบบเครือข่าย (IoT)</p>
+    </header>
+
+    <div class="grid">
+      <!-- Card 1: ควบคุมหลอดไฟ & รีเลย์ -->
+      <div class="card">
+        <div class="card-title">
+          <span>สถานะหลอดไฟ / รีเลย์</span>
+          <span id="picoStatusBadge" class="badge badge-disconnected">
+            <span class="badge-dot"></span>
+            <span id="picoStatusText">Pico W Offline</span>
+          </span>
+        </div>
+
+        <div class="lamp-container">
+          <svg id="bulbSvg" class="bulb-svg" viewBox="0 0 24 24" fill="none" stroke="#94a3b8" stroke-width="1.5">
+            <path d="M9 18h6" stroke-linecap="round"/>
+            <path d="M10 21h4" stroke-linecap="round"/>
+            <path d="M12 2a7 7 0 0 0-7 7c0 2.38 1.19 4.47 3 5.74V17a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1v-2.26c1.81-1.27 3-3.36 3-5.74a7 7 0 0 0-7-7z" id="bulbBody" fill="#334155" stroke="#94a3b8"/>
+            <path d="M12 6v4" stroke-linecap="round" id="bulbFilament" stroke="#64748b"/>
+          </svg>
+
+          <div id="bulbText" class="bulb-status-text status-off">สถานะ: ปิด (OFF)</div>
+        </div>
+
+        <div class="control-actions">
+          <button class="btn btn-on" onclick="sendLedCommand('ON')">
+            <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+            เปิดไฟ (ON)
+          </button>
+          <button class="btn btn-off" onclick="sendLedCommand('OFF')">
+            <svg width="22" height="22" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
+            ปิดไฟ (OFF)
+          </button>
+          <button class="btn btn-toggle" onclick="sendLedCommand('TOGGLE')">
+            🔄 สลับสถานะ (TOGGLE)
+          </button>
+        </div>
+      </div>
+
+      <!-- Card 2: การตั้งค่า MQTT Broker (มีปุ่มพับเก็บได้บนมือถือ เพื่อประหยัดพื้นที่) -->
+      <div id="settingsCard" class="card">
+        <div class="card-title settings-header" onclick="toggleSettingsPanel()">
+          <span>
+            ⚙️ ตั้งค่า MQTT 
+            <span class="toggle-icon" id="toggleIcon">▼</span>
+          </span>
+          <span id="brokerStatusBadge" class="badge badge-disconnected">
+            <span class="badge-dot"></span>
+            <span id="brokerStatusText">Disconnected</span>
+          </span>
+        </div>
+
+        <div class="settings-body" id="settingsBody">
+          <div class="form-group">
+            <label>WebSocket Broker URL</label>
+            <input type="text" id="brokerHost" class="form-control" value="broker.hivemq.com" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div class="form-group">
+              <label>WebSocket Port</label>
+              <input type="number" id="brokerPort" class="form-control" value="8884" inputmode="numeric">
+            </div>
+            <div class="form-group">
+              <label>Path</label>
+              <input type="text" id="brokerPath" class="form-control" value="/mqtt" autocomplete="off">
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Command Topic (ส่งคำสั่งไป Pico W)</label>
+            <input type="text" id="topicCommand" class="form-control" value="kanit/picow/led/set" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            <div class="topic-helper">*ต้องตรงกับ TOPIC_COMMAND ใน Pico W</div>
+          </div>
+
+          <div class="form-group">
+            <label>Status Topic (รับสถานะจาก Pico W)</label>
+            <input type="text" id="topicStatus" class="form-control" value="kanit/picow/led/status" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <div class="form-group">
+            <label>Availability Topic (สถานะ Online/Offline)</label>
+            <input type="text" id="topicAvailability" class="form-control" value="kanit/picow/status" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+          </div>
+
+          <button id="btnConnect" class="btn btn-connect" onclick="toggleConnect()">
+            เชื่อมต่อ Broker (Connect)
+          </button>
+        </div>
+      </div>
+
+      <!-- Card 3: คอนโซลข้อความ MQTT Log -->
+      <div class="card terminal-card">
+        <div class="card-title">
+          <span>MQTT Message Log</span>
+          <button class="btn" style="min-height: 32px; padding: 4px 10px; font-size: 0.75rem; background: rgba(255,255,255,0.1);" onclick="clearLogs()">ล้างบันทึก</button>
+        </div>
+        <div id="terminalBox" class="terminal-box">
+          <div class="terminal-line"><span class="log-time">[System]</span> <span class="log-info">ระบบพร้อมทำงาน กำลังเริ่มเชื่อมต่อ Broker...</span></div>
+        </div>
+      </div>
+
+      <!-- ข้อความแนะนำสำหรับมือถือ -->
+      <div class="mobile-tip">
+        📱 <b>ทริกสำหรับมือถือ:</b> กดที่เมนูแชร์ของบราวเซอร์ แล้วเลือก <b>"เพิ่มไปยังหน้าจอโฮม (Add to Home Screen)"</b> เพื่อเปิดใช้งานเสมือนแอปจริงเต็มจอ
+      </div>
+
+    </div>
+  </div>
+
+  <script>
+    let client = null;
+    let isConnected = false;
+    let currentLedState = false;
+
+    // อ้างอิง DOM Elements
+    const brokerHostInput = document.getElementById('brokerHost');
+    const brokerPortInput = document.getElementById('brokerPort');
+    const brokerPathInput = document.getElementById('brokerPath');
+    const topicCommandInput = document.getElementById('topicCommand');
+    const topicStatusInput = document.getElementById('topicStatus');
+    const topicAvailInput = document.getElementById('topicAvailability');
+
+    const brokerStatusBadge = document.getElementById('brokerStatusBadge');
+    const brokerStatusText = document.getElementById('brokerStatusText');
+    const picoStatusBadge = document.getElementById('picoStatusBadge');
+    const picoStatusText = document.getElementById('picoStatusText');
+    const btnConnect = document.getElementById('btnConnect');
+
+    const bulbSvg = document.getElementById('bulbSvg');
+    const bulbBody = document.getElementById('bulbBody');
+    const bulbFilament = document.getElementById('bulbFilament');
+    const bulbText = document.getElementById('bulbText');
+    const terminalBox = document.getElementById('terminalBox');
+    const settingsCard = document.getElementById('settingsCard');
+    const toggleIcon = document.getElementById('toggleIcon');
+
+    // ระบบสั่นจำลองการกดสวิตช์บนมือถือ (Haptic Feedback)
+    function triggerHaptic(duration = 40) {
+      if ('vibrate' in navigator) {
+        try { navigator.vibrate(duration); } catch (e) {}
+      }
+    }
+
+    // ฟังก์ชันย่อ/ขยายเมนูตั้งค่าสำหรับหน้าจอมือถือ
+    function toggleSettingsPanel() {
+      settingsCard.classList.toggle('settings-collapsed');
+      if (settingsCard.classList.contains('settings-collapsed')) {
+        toggleIcon.innerText = '▶';
+      } else {
+        toggleIcon.innerText = '▼';
+      }
+    }
+
+    // บันทึกและดึงค่าตั้งค่าจาก LocalStorage ป้องกันค่าหายเวลาปิดแท็บบนมือถือ
+    function loadSavedSettings() {
+      if (localStorage.getItem('pico_host')) brokerHostInput.value = localStorage.getItem('pico_host');
+      if (localStorage.getItem('pico_port')) brokerPortInput.value = localStorage.getItem('pico_port');
+      if (localStorage.getItem('pico_path')) brokerPathInput.value = localStorage.getItem('pico_path');
+      if (localStorage.getItem('pico_cmd'))  topicCommandInput.value = localStorage.getItem('pico_cmd');
+      if (localStorage.getItem('pico_stat')) topicStatusInput.value = localStorage.getItem('pico_stat');
+      if (localStorage.getItem('pico_avail')) topicAvailInput.value = localStorage.getItem('pico_avail');
+    }
+
+    function saveCurrentSettings() {
+      localStorage.setItem('pico_host', brokerHostInput.value.trim());
+      localStorage.setItem('pico_port', brokerPortInput.value.trim());
+      localStorage.setItem('pico_path', brokerPathInput.value.trim());
+      localStorage.setItem('pico_cmd',  topicCommandInput.value.trim());
+      localStorage.setItem('pico_stat', topicStatusInput.value.trim());
+      localStorage.setItem('pico_avail', topicAvailInput.value.trim());
+    }
+
+    function logMessage(topic, payload, type = 'normal') {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+      
+      const line = document.createElement('div');
+      line.className = 'terminal-line';
+
+      if (type === 'info') {
+        line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-info">${payload}</span>`;
+      } else if (type === 'err') {
+        line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-err">${payload}</span>`;
+      } else {
+        line.innerHTML = `<span class="log-time">[${timeStr}]</span> <span class="log-topic">[${topic}]</span> <span class="log-payload">${payload}</span>`;
+      }
+
+      terminalBox.appendChild(line);
+      terminalBox.scrollTop = terminalBox.scrollHeight;
+    }
+
+    function clearLogs() {
+      terminalBox.innerHTML = '';
+    }
+
+    function setLedVisual(isOn) {
+      currentLedState = isOn;
+      if (isOn) {
+        bulbSvg.classList.add('is-on');
+        bulbBody.setAttribute('fill', '#facc15');
+        bulbBody.setAttribute('stroke', '#eab308');
+        bulbFilament.setAttribute('stroke', '#ca8a04');
+        bulbText.className = 'bulb-status-text status-on';
+        bulbText.innerText = 'สถานะ: เปิด (ON)';
+      } else {
+        bulbSvg.classList.remove('is-on');
+        bulbBody.setAttribute('fill', '#334155');
+        bulbBody.setAttribute('stroke', '#94a3b8');
+        bulbFilament.setAttribute('stroke', '#64748b');
+        bulbText.className = 'bulb-status-text status-off';
+        bulbText.innerText = 'สถานะ: ปิด (OFF)';
+      }
+    }
+
+    function setPicoStatus(isOnline) {
+      if (isOnline) {
+        picoStatusBadge.className = 'badge badge-connected';
+        picoStatusText.innerText = 'Pico W Online';
+      } else {
+        picoStatusBadge.className = 'badge badge-disconnected';
+        picoStatusText.innerText = 'Pico W Offline';
+      }
+    }
+
+    function toggleConnect() {
+      triggerHaptic(30);
+      if (isConnected) {
+        disconnectBroker();
+      } else {
+        connectBroker();
+      }
+    }
+
+    function connectBroker() {
+      saveCurrentSettings();
+
+      const host = brokerHostInput.value.trim();
+      const port = Number(brokerPortInput.value.trim());
+      const path = brokerPathInput.value.trim();
+      const clientId = 'MobileWeb_' + Math.random().toString(16).substr(2, 8);
+
+      logMessage('', `กำลังเชื่อมต่อไปยัง ${host}:${port}${path}...`, 'info');
+
+      try {
+        client = new Paho.MQTT.Client(host, port, path, clientId);
+      } catch (e) {
+        logMessage('', 'เกิดข้อผิดพลาดในการสร้าง Client: ' + e.message, 'err');
+        return;
+      }
+
+      client.onConnectionLost = onConnectionLost;
+      client.onMessageArrived = onMessageArrived;
+
+      // ตรวจสอบการใช้งาน SSL อัตโนมัติ (หากหน้าเว็บรันบน HTTPS หรือพอร์ต 8884/8084/443)
+      const isHttps = window.location.protocol === 'https:';
+      const useSSL = isHttps || port === 8884 || port === 8084 || port === 443;
+
+      const options = {
+        useSSL: useSSL,
+        timeout: 10,
+        keepAliveInterval: 30,
+        cleanSession: true,
+        onSuccess: onConnectSuccess,
+        onFailure: onConnectFailure
+      };
+
+      client.connect(options);
+    }
+
+    function onConnectSuccess() {
+      isConnected = true;
+      brokerStatusBadge.className = 'badge badge-connected';
+      brokerStatusText.innerText = 'Connected';
+      btnConnect.innerText = 'ตัดการเชื่อมต่อ (Disconnect)';
+      btnConnect.style.background = '#64748b';
+
+      logMessage('', 'เชื่อมต่อ MQTT Broker สำเร็จ!', 'info');
+
+      // Subscribe topics
+      const statusTopic = topicStatusInput.value.trim();
+      const availTopic = topicAvailInput.value.trim();
+
+      client.subscribe(statusTopic);
+      logMessage('', `Subscribed: ${statusTopic}`, 'info');
+
+      client.subscribe(availTopic);
+      logMessage('', `Subscribed: ${availTopic}`, 'info');
+
+      // บนจอมือถือขนาดเล็ก เมื่อเชื่อมต่อสำเร็จจะพับเก็บกล่องตั้งค่าอัตโนมัติ เพื่อให้เห็นปุ่มควบคุมชัดเจน
+      if (window.innerWidth < 768) {
+        settingsCard.classList.add('settings-collapsed');
+        toggleIcon.innerText = '▶';
+      }
+    }
+
+    function onConnectFailure(response) {
+      isConnected = false;
+      brokerStatusBadge.className = 'badge badge-disconnected';
+      brokerStatusText.innerText = 'Disconnected';
+      btnConnect.innerText = 'เชื่อมต่อ Broker (Connect)';
+      btnConnect.style.background = 'linear-gradient(135deg, #ec4899, #db2777)';
+
+      logMessage('', `เชื่อมต่อล้มเหลว: ${response.errorMessage}`, 'err');
+    }
+
+    function disconnectBroker() {
+      if (client && client.isConnected()) {
+        client.disconnect();
+      }
+      onConnectionLost({ errorMessage: 'ผู้ใช้สั่งตัดการเชื่อมต่อ' });
+    }
+
+    function onConnectionLost(responseObject) {
+      isConnected = false;
+      brokerStatusBadge.className = 'badge badge-disconnected';
+      brokerStatusText.innerText = 'Disconnected';
+      btnConnect.innerText = 'เชื่อมต่อ Broker (Connect)';
+      btnConnect.style.background = 'linear-gradient(135deg, #ec4899, #db2777)';
+      setPicoStatus(false);
+
+      if (responseObject.errorCode !== 0) {
+        logMessage('', `ขาดการเชื่อมต่อ: ${responseObject.errorMessage}`, 'err');
+      } else {
+        logMessage('', 'ตัดการเชื่อมต่อแล้ว', 'info');
+      }
+    }
+
+    function onMessageArrived(message) {
+      const topic = message.destinationName;
+      const payload = message.payloadString.trim();
+
+      logMessage(topic, payload);
+
+      const statusTopic = topicStatusInput.value.trim();
+      const availTopic = topicAvailInput.value.trim();
+
+      // รับสถานะหลอดไฟ
+      if (topic === statusTopic) {
+        if (payload.toUpperCase() === 'ON' || payload === '1') {
+          setLedVisual(true);
+        } else if (payload.toUpperCase() === 'OFF' || payload === '0') {
+          setLedVisual(false);
+        }
+      }
+
+      // รับสถานะความพร้อมของบอร์ด Pico W
+      if (topic === availTopic) {
+        if (payload.toLowerCase() === 'online') {
+          setPicoStatus(true);
+        } else {
+          setPicoStatus(false);
+        }
+      }
+    }
+
+    function sendLedCommand(cmd) {
+      triggerHaptic(40);
+
+      if (!isConnected || !client) {
+        alert('กรุณากดเชื่อมต่อ MQTT Broker ก่อนสั่งงาน!');
+        return;
+      }
+
+      const topic = topicCommandInput.value.trim();
+      const message = new Paho.MQTT.Message(cmd);
+      message.destinationName = topic;
+      message.qos = 0;
+      client.send(message);
+
+      logMessage(topic, `[PUB] ${cmd}`);
+    }
+
+    // ตรวจสอบเมื่อสลับกลับมาที่หน้าเว็บบนมือถือ (เช่น ปลดล็อคหน้าจอ หรือสลับกลับจากแอปอื่น)
+    // หากหลุดการเชื่อมต่อ ให้เชื่อมต่อ Broker ใหม่โดยอัตโนมัติ
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        if (!isConnected || !client || !client.isConnected()) {
+          logMessage('', 'กลับมาใช้งาน ตรวจสอบและเชื่อมต่อใหม่...', 'info');
+          connectBroker();
+        }
+      }
+    });
+
+    // เริ่มต้นระบบเมื่อเปิดหน้าเว็บ
+    window.addEventListener('load', () => {
+      loadSavedSettings();
+      setTimeout(() => {
+        connectBroker();
+      }, 500);
+    });
+  </script>
+</body>
+</html>
